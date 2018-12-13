@@ -1,8 +1,8 @@
 ﻿// CodeGear C++Builder
-// Copyright (c) 1995, 2016 by Embarcadero Technologies, Inc.
+// Copyright (c) 1995, 2017 by Embarcadero Technologies, Inc.
 // All rights reserved
 
-// (DO NOT EDIT: machine generated header) 'MPCommonUtilities.pas' rev: 31.00 (Windows)
+// (DO NOT EDIT: machine generated header) 'MPCommonUtilities.pas' rev: 32.00 (Windows)
 
 #ifndef MpcommonutilitiesHPP
 #define MpcommonutilitiesHPP
@@ -183,7 +183,7 @@ extern DELPHI_PACKAGE HRESULT __stdcall (*SHDoDragDrop_MP)(HWND wnd, _di_IDataOb
 extern DELPHI_PACKAGE System::LongBool __stdcall (*GetDiskFreeSpaceExA_MP)(char * lpDirectoryName, void *lpFreeBytesAvailableToCaller, void *lpTotalNumberOfBytes, Winapi::Windows::PLargeInteger lpTotalNumberOfFreeBytes);
 extern DELPHI_PACKAGE System::LongBool __stdcall (*GetDiskFreeSpaceExW_MP)(System::WideChar * lpDirectoryName, void *lpFreeBytesAvailableToCaller, void *lpTotalNumberOfBytes, Winapi::Windows::PLargeInteger lpTotalNumberOfFreeBytes);
 extern DELPHI_PACKAGE int __stdcall (*GetNumberFormatW_MP)(unsigned Locale, unsigned dwFlags, System::WideChar * lpValue, Winapi::Windows::PNumberFmtW lpFormat, System::WideChar * lpNumberStr, int cchNumber);
-extern DELPHI_PACKAGE HRESULT __stdcall (*CDefFolderMenu_Create2_MP)(Winapi::Shlobj::PItemIDList pidlFolder, HWND wnd, unsigned cidl, Winapi::Shlobj::PItemIDList &apidl, _di_IShellFolder psf, Mpshelltypes::TFNDFMCallback lpfn, unsigned nKeys, Winapi::Windows::PHKEY ahkeyClsKeys, Mpshelltypes::_di_IContextMenu &ppcm);
+extern DELPHI_PACKAGE HRESULT __stdcall (*CDefFolderMenu_Create2_MP)(Winapi::Shlobj::PItemIDList pidlFolder, HWND wnd, unsigned cidl, Winapi::Shlobj::PItemIDList &apidl, _di_IShellFolder psf, Mpshelltypes::TFNDFMCallback lpfn, unsigned nKeys, PHKEY ahkeyClsKeys, Mpshelltypes::_di_IContextMenu &ppcm);
 extern DELPHI_PACKAGE HRESULT __stdcall (*CDefFolderMenu_Create_MP)(Winapi::Shlobj::PItemIDList pidlFolder);
 extern DELPHI_PACKAGE int __stdcall (*RegOpenKeyW_MP)(HKEY hKey, System::WideChar * lpSubKey, HKEY &phkResult);
 extern DELPHI_PACKAGE int __stdcall (*RegOpenKeyExW_MP)(HKEY hKey, System::WideChar * lpSubKey, unsigned ulOptions, unsigned samDesired, HKEY &phkResult);
