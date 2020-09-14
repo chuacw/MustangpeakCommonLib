@@ -21,16 +21,18 @@ unit MPCommonObjects;
 //
 // Portions provided by Derek Moore of Alastria Software
 //
-//----------------------------------------------------------------------------
+//---------------------------------------------------------------------------
 
 interface
-
-{$I ..\Include\Addins.inc}
 
 uses
   Types,
   Windows,
   Messages,
+  {$if CompilerVersion >= 33}
+  Generics.Collections,
+  Messaging,
+  {$ifend}
   Classes,
   Controls,
   Graphics,
@@ -59,9 +61,6 @@ type
   TILIsEqual = function(PIDL1: PItemIDList; PIDL2: PItemIDList): LongBool; stdcall;
 
   TCommonImageIndexInteger = type Integer;
-
-  TStringListEx = class(TStringList)
-  end;
 
 type
   TCommonPIDLManager = class;  // forward
@@ -288,7 +287,7 @@ type
   TCommonPIDLList = class(TList)
   private
     FLocalPIDLMgr: TCommonPIDLManager;  // this can be in an IDataObject that the shell holds on to, causing our global PIDLMgr to be freed on application destroy before the shell releases the IDataObject
-    FName: WideString;       // user Data
+    FName: string;       // user Data
     FSharePIDLs: Boolean;    // If true the class will not free the PIDL's automaticlly when destroyed
     FDestroying: Boolean;  // Instance of a PIDLManager used to easily deal with the PIDL's
     function GetPIDL(Index: integer): PItemIDList;
@@ -306,7 +305,7 @@ type
     function LoadFromStream( Stream: TStream): Boolean; virtual;
     function SaveToStream( Stream: TStream): Boolean; virtual;
     procedure StripDesktopPIDLs;
-    property Name: WideString read FName write FName;
+    property Name: string read FName write FName;
     property SharePIDLs: Boolean read FSharePIDLs write FSharePIDLs;
   end;
 
@@ -323,7 +322,7 @@ type
     destructor Destroy; override;
 
     function AllocGlobalMem(Size: Integer): PByte;
-    function AllocStrGlobal(SourceStr: WideString): POleStr;
+    function AllocStrGlobal(SourceStr: string): POleStr;
     function AppendPIDL(DestPIDL, SrcPIDL: PItemIDList): PItemIDList;
     function BindToParent(AbsolutePIDL: PItemIDList; var Folder: IShellFolder): Boolean;
     function CopyPIDL(APIDL: PItemIDList): PItemIDList;
@@ -342,7 +341,6 @@ type
     function LoadFromStream(Stream: TStream): PItemIDList;
     procedure ParsePIDL(AbsolutePIDL: PItemIDList; var PIDLList: TCommonPIDLList; AllAbsolutePIDLs: Boolean);
     procedure ParsePIDLArray(PIDLArray: PPIDLRawArray; var PIDLList: TCommonPIDLList; Count: Integer; Relative, CopyPIDLs: Boolean);
-    function StringToPIDL(PIDLStr: AnsiString): PItemIDList;
     function StripLastID(IDList: PItemIDList): PItemIDList; overload;
     function StripLastID(IDList: PItemIDList; var Last_CB: Word; var LastID: PItemIDList): PItemIDList; overload;
     procedure SaveToStream(Stream: TStream; PIDL: PItemIdList);
@@ -359,20 +357,18 @@ type
     function ReadColor(S: TStream): TColor;
     function ReadInt64(S: TStream): Int64;
     function ReadInteger(S: TStream): Integer;
-    function ReadString(S: TStream): AnsiString;
-    function ReadWideString(S: TStream): WideString;
+    function ReadAnsiString(S: TStream): AnsiString;
+    function ReadUnicodeString(S: TStream): string;
     function ReadExtended(S: TStream): Extended;
     procedure ReadStream(SourceStream, TargetStream: TStream);
- //   procedure ReadPublishedProperties(S: TStream; Instance: TObject; RecurseSubClasses: Boolean);
     procedure WriteBoolean(S: TStream; Value: Boolean);
     procedure WriteColor(S: TStream; Value: TColor);
     procedure WriteExtended(S: TStream; Value: Extended);
     procedure WriteInt64(S: TStream; Value: Int64);
     procedure WriteInteger(S: TStream; Value: Integer);
     procedure WriteStream(SourceStream, TargetStream: TStream);
-//    procedure WritePublishedProperties(S: TStream; Instance: TObject; RecurseSubClasses: Boolean);
-    procedure WriteString(S: TStream; Value: AnsiString);
-    procedure WriteWideString(S: TStream; Value: WideString);
+    procedure WriteAnsiString(S: TStream; Value: AnsiString);
+    procedure WriteUnicodeString(S: TStream; Value: string);
   end;
 
   //
@@ -383,16 +379,16 @@ type
     function ReadBoolean: Boolean;
     function ReadByte: Byte;
     function ReadInteger: Integer;
-    function ReadString: AnsiString;
+    function ReadAnsiString: AnsiString;
     function ReadStringList: TStringList;
-    function ReadWideString: WideString;
+    function ReadUnicodeString: string;
 
     procedure WriteBoolean(Value: Boolean);
     procedure WriteByte(Value: Byte);
     procedure WriteInteger(Value: Integer);
-    procedure WriteString(const Value: AnsiString);
+    procedure WriteAnsiString(const Value: AnsiString);
     procedure WriteStringList(Value: TStringList);
-    procedure WriteWideString(const Value: WideString);
+    procedure WriteUnicodeString(const Value: string);
   end;
 
   //
@@ -442,12 +438,10 @@ type
   TCommonSysImages = class(TImageList)
   private
     FImageSize: TSysImageListSize;
-    FJumboImages: IImageList;
     procedure SetImageSize(const Value: TSysImageListSize);
   protected
     procedure RecreateHandle;
     procedure Flush;
-    property JumboImages: IImageList read FJumboImages;
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
@@ -455,57 +449,67 @@ type
     property ImageSize: TSysImageListSize read FImageSize write SetImageSize;
   end;
 
-{  TCommonHintWindow = class(THintWindow)
+{$IF CompilerVersion >= 33}
+  /// <summary>
+  /// TVirtualImageList component, which inherits from TCustomImageList
+  /// and uses an external TCustomImageList to draw scaled images
+  /// </summary>
+  TCommonVirtualImageList = class(TCustomImageList)
   private
-    FAnsiCaption: string;
-    FCaption: WideString;
-    FNewLastActive: Cardinal;
-    FOldWndProc: TWndMethod;
-    FOwnerWnd: TWinControl;
-    FTipShowing: boolean;
-    procedure SetCaption(const Value: WideString);
+    FDPIChangedMessageID: Integer;
+    FSourceImageList: TCustomImageList;
+    procedure SetSourceImageList(Value: TCustomImageList);
+    procedure DPIChangedMessageHandler(const Sender: TObject; const Msg: Messaging.TMessage);
   protected
-    procedure CreateParams(var Params: TCreateParams); override;
-    procedure CreateWindowHandle(const Params: TCreateParams); override;
-    procedure CreateWnd; override;
-    procedure DestroyWnd; override;
-    procedure HookProc(var Message: TMessage);
-    procedure WMDestroy(var Msg: TMessage); message WM_DESTROY;
-    procedure WMEraseBkgnd(var Msg: TWMEraseBkgnd); message WM_ERASEBKGND;
-    procedure WMNCPaint(var Msg: TWMNCPaint); message WM_NCPAINT;
-    procedure WMPaint(var Msg: TWMPaint); message WM_PAINT;
-    procedure WMShowWindow(var Msg: TWMShowWindow); message WM_SHOWWINDOW;
-    property AnsiCaption: string read FAnsiCaption write FAnsiCaption;
-    property NewLastActive: Cardinal read FNewLastActive write FNewLastActive;
-    property OldWndProc: TWndMethod read FOldWndProc write FOldWndProc;
-    property OwnerWnd: TWinControl read FOwnerWnd write FOwnerWnd;
+    function GetCount: Integer; override;
+    procedure Notification(AComponent: TComponent; Operation: TOperation); override;
   public
     constructor Create(AOwner: TComponent); override;
-    destructor Destroy; override;
-    procedure ActivateHint(Rect: TRect; const AHint: string); override;
-    property Caption: WideString read FCaption write SetCaption;
-    property TipShowing: boolean read FTipShowing;
-  end;     }
+    procedure DoDraw(Index: Integer; Canvas: TCanvas; X, Y: Integer;
+       Style: Cardinal; Enabled: Boolean = True); override;
+    property SourceImageList: TCustomImageList
+      read FSourceImageList write SetSourceImageList;
+    property Width;
+    property Height;
+  end;
+{$IFEND}
 
   function JumboSysImages : TCommonSysImages;
   function ExtraLargeSysImages: TCommonSysImages;
   function LargeSysImages: TCommonSysImages;
   function SmallSysImages: TCommonSysImages;
+  function LargeSysImagesForPPI(PPI: Integer): TCustomImageList;
+  function SmallSysImagesForPPI(PPI: Integer): TCustomImageList;
   procedure FlushImageLists;
   procedure CreateFullyQualifiedShellDataObject(NamespaceList: TList; DragDropObject: Boolean; var ADataObject: IDataObject);
   procedure StripDuplicatesAndDesktops(NamespaceList: TList);
   function ILIsParent(PIDL1: PItemIDList; PIDL2: PItemIDList; ImmediateParent: LongBool): LongBool;
   function ILIsEqual(PIDL1: PItemIDList; PIDL2: PItemIDList): LongBool;
 
+type
+  (*  Helper methods for TControl *)
+  TControlHelper = class helper for TControl
+  public
+    {$IF CompilerVersion < 33}
+    function CurrentPPI: Integer;
+    function FCurrentPPI: Integer;
+    {$IFEND}
+    (* Scale a value according to the FCurrentPPI *)
+    function PPIScale(Value: integer): integer;
+    (* Reverse PPI Scaling  *)
+    function PPIUnScale(Value: integer): integer;
+  end;
+
 var
   StreamHelper: TCommonMemoryStreamHelper;
   Checks: TCommonCheckBoundManager;
   MarlettFont: TFont;
-  
+
 
 implementation
 
 uses
+  UITypes,
   MPCommonUtilities,
   MPDataObject,
   MPShellUtilities,
@@ -518,12 +522,16 @@ var
   FExtraLargeSysImages: TCommonSysImages = nil;
   FLargeSysImages: TCommonSysImages = nil;
   FSmallSysImages: TCommonSysImages = nil;
+  {$if CompilerVersion >= 33}
+  FLargeSysImagesForPPI: TObjectDictionary<Integer,TCustomImageList> = nil;
+  FSmallSysImagesForPPI: TObjectDictionary<Integer,TCustomImageList> = nil;
+  {$ifend}
   PIDLMgr: TCommonPIDLManager = nil;
   ILIsParent_MP: TILIsParent = nil;
   ILIsEqual_MP: TILIsEqual = nil;
 
 function MultiPathNamespaceListSort(Item1, Item2: Pointer): Integer;
-// Simply sorts the PIDLs by their length, it has nothing to do with the name 
+// Simply sorts the PIDLs by their length, it has nothing to do with the name
 begin
   Result := PIDLMgr.IDCount(TNamespace(Item2).AbsolutePIDL) - PIDLMgr.IDCount(TNamespace(Item1).AbsolutePIDL)
 end;
@@ -553,7 +561,7 @@ begin
   if Assigned(FExtraLargeSysImages) then
     FExtraLargeSysImages.Flush;
   if Assigned(FJumboSysImages) then
-    FJumboSysImages.Flush;           
+    FJumboSysImages.Flush;
 end;
 function JumboSysImages : TCommonSysImages;
 begin
@@ -595,23 +603,49 @@ begin
   Result := FSmallSysImages
 end;
 
-function SHGetImageList(iImageList: Integer; const RefID: TGUID; out ppvOut): HRESULT;
-// Retrieves the system ImageList interface
-var
-  ImageList: TSHGetImageList;
+{$if CompilerVersion >= 33}
+function LargeSysImagesForPPI(PPI: Integer): TCustomImageList;
 begin
-  Result := E_NOTIMPL;
-  if (Win32Platform = VER_PLATFORM_WIN32_NT) then
+  if Screen.PixelsPerInch = PPI then
+    Result := LargeSysImages
+  else
   begin
-    ShellDLL := LoadLibrary(Shell32);
-    if ShellDLL <> 0 then
+    if not Assigned(FLargeSysImagesForPPI) then
+      FLargeSysImagesForPPI := TObjectDictionary<Integer,TCustomImageList>.Create([doOwnsValues]);
+    if not FLargeSysImagesForPPI.TryGetValue(PPI, Result) then
     begin
-      ImageList := GetProcAddress(ShellDLL, PAnsiChar(727));
-      if (Assigned(ImageList)) then
-        Result := ImageList(iImageList, RefID, ppvOut);
-    end
+      Result := ScaleImageList(SmallSysImages, PPI, Screen.PixelsPerInch);
+      Result.DrawingStyle := dsTransparent;
+      FLargeSysImagesForPPI.Add(PPI, Result);
+    end;
   end;
 end;
+
+function SmallSysImagesForPPI(PPI: Integer): TCustomImageList;
+begin
+  if Screen.PixelsPerInch = PPI then
+    Result := SmallSysImages
+  else
+  begin
+    if not Assigned(FSmallSysImagesForPPI) then
+      FSmallSysImagesForPPI := TObjectDictionary<Integer,TCustomImageList>.Create([doOwnsValues]);
+    if not FSmallSysImagesForPPI.TryGetValue(PPI, Result) then
+    begin
+      Result := ScaleImageList(SmallSysImages, PPI, Screen.PixelsPerInch);
+      FSmallSysImagesForPPI.Add(PPI, Result);
+    end;
+  end;
+end;
+{$else}
+function LargeSysImagesForPPI(PPI: Integer): TCustomImageList;
+begin
+  Result := LargeSysImages;
+end;
+function SmallSysImagesForPPI(PPI: Integer): TCustomImageList;
+begin
+  Result := SmallSysImages;
+end;
+{$ifend}
 
 procedure StripDuplicatesAndDesktops(NamespaceList: TList);
 
@@ -627,7 +661,7 @@ var
 begin
   // Sort the list from shortest PIDL length to longest
   NamespaceList.Sort(MultiPathNamespaceListSort);
-  
+
   if NamespaceList.Count > 0 then
   begin
     Dups := TList.Create;
@@ -1335,7 +1369,7 @@ begin
             // Remove any clipping regions applied by the views.
             SelectClipRgn(BackBits.Canvas.Handle, 0);
 
-            AfterPaintRect(BackBits.Canvas, PaintInfo.rcPaint);   
+            AfterPaintRect(BackBits.Canvas, PaintInfo.rcPaint);
 
             // Blast the bits to the screen
             BitBlt(PaintInfo.hdc, PaintInfo.rcPaint.Left, PaintInfo.rcPaint.Top,
@@ -1350,7 +1384,7 @@ begin
         if not CacheDoubleBufferBits then
           FreeAndNil(FBackBits)
       end;
-    end    
+    end
   finally
     EndPaint(Handle, PaintInfo);
   end
@@ -1685,15 +1719,6 @@ begin
   end
 end;
 
-function TCommonPIDLManager.StringToPIDL(PIDLStr: AnsiString): PItemIDList;
-var
-  P: PAnsiChar;
-begin
-  Result := FMalloc.Alloc(Length(PIDLStr));
-  P := @PIDLStr[1];
-  Move(P^, Result^, Length(PIDLStr));
-end;
-
 function TCommonPIDLManager.StripLastID(IDList: PItemIDList): PItemIDList;
 // Removes the last PID from the list. Returns the same, shortened, IDList passed
 // to the function
@@ -1794,7 +1819,7 @@ begin
   FreePIDL(OldPIDL)
 end;
 
-function TCommonPIDLManager.AllocStrGlobal(SourceStr: WideString): POleStr;
+function TCommonPIDLManager.AllocStrGlobal(SourceStr: string): POleStr;
 begin
   Result := Malloc.Alloc((Length(SourceStr) + 1) * 2); // Add the null
   if Result <> nil then
@@ -1870,10 +1895,10 @@ end;
 
 procedure LoadShell32Functions;
 begin
-  ShellDLL := GetModuleHandleA(PAnsiChar( AnsiString( Shell32)));
+  ShellDLL := GetModuleHandle(Shell32);
   if ShellDLL = 0 then
   begin
-    ShellDLL := LoadLibraryA(PAnsiChar( AnsiString( Shell32)));
+    ShellDLL := LoadLibrary(Shell32);
     FreeShellLib := True;
   end;
   if ShellDll <> 0 then
@@ -1904,7 +1929,7 @@ begin
   S.Read(Result, SizeOf(Result))
 end;
 
-function TCommonMemoryStreamHelper.ReadString(S: TStream): AnsiString;
+function TCommonMemoryStreamHelper.ReadAnsiString(S: TStream): AnsiString;
 var
   i: Integer;
 begin
@@ -1913,7 +1938,7 @@ begin
   S.Read(PAnsiChar(Result)^, i);
 end;
 
-function TCommonMemoryStreamHelper.ReadWideString(S: TStream): WideString;
+function TCommonMemoryStreamHelper.ReadUnicodeString(S: TStream): string;
 var
   i: Integer;
 begin
@@ -1935,72 +1960,13 @@ begin
   TargetStream.Size := 0;
   SourceStream.Read(Len, SizeOf(Len));
   if Len > 0 then
-  begin   
+  begin
     SetLength(X, Len);
     SourceStream.Read(X[0], Len);
     TargetStream.Write(X[0], Len);
   end
 end;
 
-{
-
-Needs to be modified for D5 and D4
-
-procedure TCommonMemoryStreamHelper.ReadPublishedProperties(S: TStream; Instance: TObject; RecurseSubClasses: Boolean);
-var
-  TypeInfo: PTypeInfo;
-  TypeData: PTypeData;
-  PropList: PPropList;
-  i: Integer;
-  Obj: TObject;
-begin
-  if Assigned(Instance) then
-  begin
-    TypeInfo := PTypeInfo(Instance.ClassInfo);
-    TypeData := GetTypeData(TypeInfo);
-    GetMem(PropList, TypeData.PropCount * SizeOf(Pointer));
-    try
-      GetPropInfos(TypeInfo, PropList);
-      for i := 0 to TypeData.PropCount - 1 do
-      begin
-        case PropList[i].PropType^^.Kind of
-          tkClass:
-            begin
-              if RecurseSubClasses then
-              begin
-                Obj := GetObjectProp(Instance, PropList[i]);
-                ReadPublishedProperties(S, Obj, RecurseSubClasses);
-              end
-            end;
-          tkInteger, tkChar, tkWChar, tkEnumeration, tkSet:
-            begin
-              SetOrdProp(Instance, PropList[i], ReadInteger(S));
-            end;
-          tkFloat:
-            begin
-              SetFloatProp(Instance, PropList[i], ReadExtended(S));
-            end;
-          tkString:
-            begin
-              SetStrProp(Instance, PropList[i], ReadString(S));
-            end;
-          tkWString, tkLString:
-            begin
-              // It looks like the VCL messes this up completely.
-              SetWideStrProp(Instance, PropList[i], ReadWideString(S));
-            end;
-          tkInt64:
-            begin
-              SetInt64Prop(Instance, PropList[i], ReadInt64(S));
-            end;
-        end
-      end;
-    finally
-      FreeMem(PropList);
-    end
-  end
-end;
-}
 procedure TCommonMemoryStreamHelper.WriteBoolean(S: TStream; Value: Boolean);
 begin
   S.Write(Value, SizeOf(Value))
@@ -2043,68 +2009,13 @@ begin
   end
 end;
 
-{
-
-Needs to be modified for D5 and D4
-
-procedure TCommonMemoryStreamHelper.WritePublishedProperties(S: TStream; Instance: TObject; RecurseSubClasses: Boolean);
-var
-  TypeInfo: PTypeInfo;
-  TypeData: PTypeData;
-  PropList: PPropList;
-  i: Integer;
-begin
-  if Assigned(Instance) then
-  begin
-    TypeInfo := PTypeInfo(Instance.ClassInfo);
-    TypeData := GetTypeData(TypeInfo);
-    GetMem(PropList, TypeData.PropCount * SizeOf(Pointer));
-    try
-      GetPropInfos(TypeInfo, PropList);
-      for i := 0 to TypeData.PropCount - 1 do
-      begin
-        case PropList[i].PropType^^.Kind of
-          tkClass:
-            begin
-              if RecurseSubClasses then
-                WritePublishedProperties(S, GetObjectProp(Instance, PropList[i].Name), RecurseSubClasses);
-            end;
-          tkInteger, tkChar, tkWChar, tkEnumeration, tkSet:
-            begin
-               WriteInteger(S, GetOrdProp(Instance, PropList[i]))
-            end;
-          tkFloat:
-            begin
-              WriteExtended(S, GetFloatProp(Instance, PropList[i]))
-            end;
-          tkString:
-            begin
-              WriteString(S, GetStrProp(Instance, PropList[i]))
-            end;
-          tkWString, tkLString:
-            begin
-              WriteWideString(S, GetWideStrProp(Instance, PropList[i]));
-            end;
-          tkInt64:
-            begin
-              WriteInt64(S, GetInt64Prop(Instance, PropList[i]))
-            end;
-        end
-      end;
-    finally
-      FreeMem(PropList);
-    end
-  end
-end;
-}
-
-procedure TCommonMemoryStreamHelper.WriteString(S: TStream; Value: AnsiString);
+procedure TCommonMemoryStreamHelper.WriteAnsiString(S: TStream; Value: AnsiString);
 begin
   WriteInteger(S, Length(Value));
   S.Write(PAnsiChar(Value)^, Length(Value))
 end;
 
-procedure TCommonMemoryStreamHelper.WriteWideString(S: TStream; Value: WideString);
+procedure TCommonMemoryStreamHelper.WriteUnicodeString(S: TStream; Value: string);
 begin
   WriteInteger(S, Length(Value));
   S.Write(PWideChar(Value)^, Length(Value) * 2)
@@ -2238,7 +2149,7 @@ begin
   ReadBuffer(Result, SizeOf(Integer))
 end;
 
-function TCommonStream.ReadString: AnsiString;
+function TCommonStream.ReadAnsiString: AnsiString;
 var
   Size: LongWord;
 begin
@@ -2254,10 +2165,10 @@ begin
   Result := TStringList.Create;
   ReadBuffer(Count, SizeOf(LongWord));
   for i := 0 to Count - 1 do
-    Result.Add(string(ReadString))
+    Result.Add(ReadUnicodeString);
 end;
 
-function TCommonStream.ReadWideString: WideString;
+function TCommonStream.ReadUnicodeString: string;
 var
   Size: LongWord;
 begin
@@ -2281,7 +2192,7 @@ begin
   WriteBuffer(Value, SizeOf(Integer))
 end;
 
-procedure TCommonStream.WriteString(const Value: AnsiString);
+procedure TCommonStream.WriteAnsiString(const Value: AnsiString);
 var
   Size: LongWord;
 begin
@@ -2297,10 +2208,10 @@ begin
   Count := Value.Count;
   WriteBuffer(Count, SizeOf(Count));
   for i := 0 to Count - 1 do
-    WriteString(AnsiString(Value[i]))
+    WriteUnicodeString(Value[i]);
 end;
 
-procedure TCommonStream.WriteWideString(const Value: WideString);
+procedure TCommonStream.WriteUnicodeString(const Value: string);
 var
   Size: LongWord;
 begin
@@ -2390,46 +2301,14 @@ end;
 
 procedure TCommonSysImages.RecreateHandle;
 var
-  PIDL: PItemIDList;
-  Malloc: IMalloc;
-  FileInfo: TSHFileInfoA;
-  Flags: Longword;
+  IL : IImageList;
+Const
+  ImageFlag: array[TSysImageListSize] of Integer =
+    (SHIL_SMALL, SHIL_LARGE, SHIL_EXTRALARGE, SHIL_JUMBO);
 begin
   Handle := 0;
-  if FImageSize = sisJumbo then 
-  begin
-    if Succeeded(SHGetImageList(SHIL_JUMBO, IImageList, FJumboImages)) then
-      Handle := THandle(FJumboImages)
-    else begin
-      Flags := SHGFI_PIDL or SHGFI_SYSICONINDEX or SHGFI_LARGEICON;
-      SHGetSpecialFolderLocation(0, CSIDL_DESKTOP, PIDL);
-      SHGetMalloc(Malloc);
-      Handle := SHGetFileInfoA(PAnsiChar(PIDL), 0, FileInfo, SizeOf(FileInfo), Flags);
-      Malloc.Free(PIDL);
-    end
-  end
-  else if FImageSize = sisExtraLarge then
-  begin
-    if Succeeded(SHGetImageList(SHIL_EXTRALARGE, IImageList, FJumboImages)) then
-      Handle := THandle(FJumboImages)
-    else begin
-      Flags := SHGFI_PIDL or SHGFI_SYSICONINDEX or SHGFI_LARGEICON;
-      SHGetSpecialFolderLocation(0, CSIDL_DESKTOP, PIDL);
-      SHGetMalloc(Malloc);
-      Handle := SHGetFileInfoA(PAnsiChar(PIDL), 0, FileInfo, SizeOf(FileInfo), Flags);
-      Malloc.Free(PIDL);
-    end
-  end else
-  begin
-    SHGetSpecialFolderLocation(0, CSIDL_DESKTOP, PIDL);
-    SHGetMalloc(Malloc);
-    if FImageSize = sisSmall then
-      Flags := SHGFI_PIDL or SHGFI_SYSICONINDEX or SHGFI_SMALLICON
-    else
-      Flags := SHGFI_PIDL or SHGFI_SYSICONINDEX or SHGFI_LARGEICON;
-    Handle := SHGetFileInfoA(PAnsiChar(PIDL), 0, FileInfo, SizeOf(FileInfo), Flags);
-    Malloc.Free(PIDL);
-  end;
+  if Succeeded(SHGetImageList(ImageFlag[FImageSize], IImageList, IL)) then
+    Handle := THandle(IL);
 end;
 
 procedure TCommonSysImages.SetImageSize(const Value: TSysImageListSize);
@@ -2438,206 +2317,142 @@ begin
   RecreateHandle;
 end;
 
-(*
-{ TCommonHintWindow }
+{$IF CompilerVersion >= 33}
+{ TCommonVirtualImageList }
 
-constructor TCommonHintWindow.Create(AOwner: TComponent);
-begin
-  inherited Create(AOwner);
-  OwnerWnd := TWinControl.CreateParented(Application.Handle);
-  OwnerWnd.Width := 0;
-  OwnerWnd.Height := 0;
-  OldWndProc := OwnerWnd.WindowProc;
-  OwnerWnd.WindowProc := HookProc;
-  Width := 0;
-  Height := 0;
-end;
-
-destructor TCommonHintWindow.Destroy;
-begin
-  inherited Destroy;
-end;
-
-procedure TCommonHintWindow.ActivateHint(Rect: TRect; const AHint: string);
- type
-  TAnimationStyle = (atSlideNeg, atSlidePos, atBlend);
-const
-  AnimationStyle: array[TAnimationStyle] of Integer = (AW_VER_NEGATIVE,
-    AW_VER_POSITIVE, AW_BLEND);
-var
-  TIA: TOOLINFOA;
-  TIW: TOOLINFOW;
-  Flags: UINT;
-begin
-  try
-    Caption := AHint;
-    Parent := OwnerWnd;
-
-    Inc(Rect.Bottom, 4);
-    UpdateBoundsRect(Rect);
-    if Rect.Top + Height > Screen.DesktopHeight then
-      Rect.Top := Screen.DesktopHeight - Height;
-    if Rect.Left + Width > Screen.DesktopWidth then
-      Rect.Left := Screen.DesktopWidth - Width;
-    if Rect.Left < Screen.DesktopLeft then Rect.Left := Screen.DesktopLeft;
-    if Rect.Bottom < Screen.DesktopTop then Rect.Bottom := Screen.DesktopTop;
-
-    Flags := TTF_IDISHWND or TTF_SUBCLASS or TTF_TRANSPARENT;
-
-    if IsUnicode then
-    begin
-      Fillchar(TIW, SizeOf(TIW), #0);
-      TIW.cbSize := SizeOf(TIW);
-      TIW.hwnd := OwnerWnd.Handle;
-      TIW.lpszText := PWideChar( FCaption);
-      TIW.uFlags := Flags;
-      TIW.hInst := hInstance;
-      TIW.Rect := Rect;
-      TIW.uID := Handle;
-      SendMessage(Handle, TTM_ADDTOOLW, 0, Integer(@TIW));
-      SendMessage(Handle, TTM_TRACKACTIVATE, Integer(BOOL(True)), Integer(@TIW));
-    end else
-    begin
-      Fillchar(TIA, SizeOf(TIA), #0);
-      TIA.cbSize := SizeOf(TIA);
-      TIW.hwnd := OwnerWnd.Handle;
-      TIA.lpszText := PAnsiChar( FAnsiCaption);
-      TIA.uFlags := Flags;
-      TIA.hInst := hInstance;
-      TIA.Rect := Rect;
-      TIA.uID := Handle;
-      SendMessage(Handle, TTM_ADDTOOLA, 0, Integer(@TIA));
-      SendMessage(Handle, TTM_TRACKACTIVATE, Integer(BOOL(True)), Integer(@TIA));
-    end;
-    FTipShowing := True;
-  finally
-    FNewLastActive := GetTickCount;
-  end;
-end;
-
-procedure TCommonHintWindow.CreateParams(var Params: TCreateParams);
-begin
-  InitCommonControl(ICC_BAR_CLASSES);
-  inherited CreateParams(Params);
-  CreateSubClass(Params, TOOLTIPS_CLASS);
-  Params.WndParent := OwnerWnd.Handle;
-  Params.Style := WS_POPUP or TTS_NOPREFIX or TTS_ALWAYSTIP;
-end;
-
-procedure TCommonHintWindow.CreateWindowHandle(const Params: TCreateParams);
-var
-  WideClassName: WideString;
-begin
-  if IsUnicode then
-  begin
-    WideClassName := Params.WinClassName;
-    WindowHandle := CreateWindowExW(Params.ExStyle, PWideChar( WideClassName), PWidechar( Caption),
-      Params.Style, Params.X, Params.Y, Params.Width, Params.Height, Params.WndParent, 0, Params.WindowClass.hInstance,
-      Params.Param)
-  end else
-    inherited CreateWindowHandle(Params);
-end;
-
-procedure TCommonHintWindow.CreateWnd;
-begin
-  inherited CreateWnd;
-  SetWindowPos(Handle, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOACTIVATE);
-end;
-
-procedure TCommonHintWindow.DestroyWnd;
-begin
-  inherited DestroyWnd;
-end;
-
-procedure TCommonHintWindow.HookProc(var Message: TMessage);
-var
-  NMHDR: PNMHDR;
-begin
-  if Message.Msg = WM_NOTIFY then
-  begin
-    if Message.wParam = Integer( Handle) then
-    begin
-      NMHDR := PNMHDR(Message.LParam);
-      case NMHDR.code of
-        TTN_POP: begin
-    //        beep;
-          end;
-        TTN_SHOW: begin
-    //        beep;
-          end;
-      end;
-    end;
-  end;
-  OldWndProc(Message);
-end;
-
-procedure TCommonHintWindow.SetCaption(const Value: WideString);
-begin
-  FCaption := Value;
-  AnsiCaption := Value;
-end;
-
-procedure TCommonHintWindow.WMDestroy(var Msg: TMessage);
+constructor TCommonVirtualImageList.Create(AOwner: TComponent);
 begin
   inherited;
+  FDPIChangedMessageID := TMessageManager.DefaultManager.SubscribeToMessage(TChangeScaleMessage, DPIChangedMessageHandler);
+  HandleNeeded;
 end;
 
-procedure TCommonHintWindow.WMEraseBkgnd(var Msg: TWMEraseBkgnd);
-begin
-  // Don't do VCL default
-  CallWindowProc(DefWndProc, Handle, TMessage(Msg).Msg, TMessage(Msg).wParam, TMessage(Msg).lParam);
-end;
-
-procedure TCommonHintWindow.WMNCPaint(var Msg: TWMNCPaint);
-begin
-  // Don't do VCL default
-  CallWindowProc(DefWndProc, Handle, TMessage(Msg).Msg, TMessage(Msg).wParam, TMessage(Msg).lParam);
-end;
-
-procedure TCommonHintWindow.WMPaint(var Msg: TWMPaint);
-begin
-  // Don't do VCL default
-   CallWindowProc(DefWndProc, Handle, TMessage(Msg).Msg, TMessage(Msg).wParam, TMessage(Msg).lParam);
-end;
-
-procedure TCommonHintWindow.WMShowWindow(var Msg: TWMShowWindow);
+procedure TCommonVirtualImageList.DPIChangedMessageHandler(const Sender: TObject; const Msg: Messaging.TMessage);
 var
-  TIA: TOOLINFOA;
-  TIW: TOOLINFOW;
-  Flags: UINT;
+  W, H: Integer;
+  ApplyChange: Boolean;
+  C: TComponent;
 begin
-  if not Msg.Show and TipShowing then
+  ApplyChange := False;
+  C := Owner;
+  while Assigned(C) do
   begin
-    Flags := TTF_IDISHWND or TTF_SUBCLASS or TTF_TRANSPARENT;
-
-    if IsUnicode then
+    if C = TChangeScaleMessage(Msg).Sender then
     begin
-      Fillchar(TIW, SizeOf(TIW), #0);
-      TIW.cbSize := SizeOf(TIW);
-      TIW.hwnd := OwnerWnd.Handle;
-      TIW.lpszText := PWideChar( FCaption);
-      TIW.uFlags := Flags;
-      TIW.hInst := hInstance;
-      TIW.uID := Handle;
-      SendMessage(Handle, TTM_TRACKACTIVATE, Integer(BOOL(False)), Integer(@TIW));
-      SendMessage(Handle, TTM_DELTOOLW, 0, Integer(@TIW));
-    end else
-    begin
-      Fillchar(TIA, SizeOf(TIA), #0);
-      TIA.cbSize := SizeOf(TIA);
-      TIW.hwnd := OwnerWnd.Handle;
-      TIA.lpszText := PAnsiChar( FAnsiCaption);
-      TIA.uFlags := Flags;
-      TIA.hInst := hInstance;
-      TIA.uID := Handle;
-      SendMessage(Handle, TTM_TRACKACTIVATE, Integer(BOOL(False)), Integer(@TIA));
-      SendMessage(Handle, TTM_DELTOOLA, 0, Integer(@TIA));
+      ApplyChange := True;
+      Break;
     end;
-    FTipShowing := False
-  end
+    C := C.Owner;
+  end;
+
+  if ApplyChange then
+  begin
+    W := MulDiv(Width, TChangeScaleMessage(Msg).M, TChangeScaleMessage(Msg).D);
+    H := MulDiv(Height, TChangeScaleMessage(Msg).M, TChangeScaleMessage(Msg).D);
+    SetSize(W, H);
+    Change;
+  end;
 end;
 
-*)
+function TCommonVirtualImageList.GetCount: Integer;
+begin
+  if Assigned(FSourceImageList) then
+    Result := FSourceImageList.Count
+  else
+    Result := 0;
+end;
+
+procedure TCommonVirtualImageList.Notification(AComponent: TComponent;
+  Operation: TOperation);
+begin
+  inherited;
+  if (Operation = opRemove) and (AComponent = FSourceImageList) then
+    FSourceImageList := nil;
+end;
+
+procedure TCommonVirtualImageList.SetSourceImageList(Value: TCustomImageList);
+begin
+  if Assigned(FSourceImageList) and (Value <> FSourceImageList) then
+     FSourceImageList.RemoveFreeNotification(Self);
+  if Assigned(Value) and (Value <> FSourceImageList) then
+  begin
+    SetSize(Value.Width, Value.Height);
+    ColorDepth := Value.ColorDepth;
+    BkColor := Value.BkColor;
+    BlendColor := Value.BlendColor;
+    DrawingStyle := Value.DrawingStyle;
+    Value.FreeNotification(Self);
+  end;
+  FSourceImageList := Value;
+end;
+
+type
+  PColorRecArray = ^TColorRecArray;
+  TColorRecArray = array [0..0] of TColorRec;
+
+procedure InitAlpha(ABitmap: TBitmap);
+var
+  I: Integer;
+  Src: Pointer;
+begin
+  Src := ABitmap.Scanline[ABitmap.Height - 1];
+  for I := 0 to ABitmap.Width * ABitmap.Height - 1 do
+    PColorRecArray(Src)[I].A := 0;
+end;
+
+type
+  TAccessCustomImageList = class(TCustomImageList)
+  end;
+
+procedure TCommonVirtualImageList.DoDraw(Index: Integer; Canvas: TCanvas; X, Y: Integer;
+  Style: Cardinal; Enabled: Boolean = True);
+var
+  B: TBitmap;
+begin
+  if not Assigned (FSourceImageList) or (Index < 0) or (Index >= FSourceImageList.Count) then
+    Exit;
+  if (Width = FSourceImageList.Width) and (Height =  FSourceImageList.Height) then begin
+    TAccessCustomImageList(FSourceImageList).DoDraw(Index, Canvas, X, Y, Style, Enabled);
+    Exit;
+  end;
+
+  B := TBitmap.Create;
+  try
+    B.PixelFormat := pf32bit;
+    B.SetSize(FSourceImageList.Width, FSourceImageList.Height);
+    InitAlpha(B);
+    TAccessCustomImageList(FSourceImageList).DoDraw(Index, B.Canvas, 0, 0, Style, Enabled);
+    ResizeBitmap(B, Width, Height);
+    Canvas.Draw(X, Y, B);
+  finally
+    B.Free;
+  end;
+end;
+{$IFEND}
+
+{ TControlHelper }
+
+{$IF CompilerVersion < 33}
+function TControlHelper.CurrentPPI: Integer;
+begin
+  Result := Screen.PixelsPerInch;
+end;
+
+function TControlHelper.FCurrentPPI: Integer;
+begin
+  Result := Screen.PixelsPerInch;
+end;
+{$IFEND}
+
+function TControlHelper.PPIScale(Value: integer): integer;
+begin
+  Result := MulDiv(Value, FCurrentPPI, 96);
+end;
+
+function TControlHelper.PPIUnScale(Value: integer): integer;
+begin
+  Result := MulDiv(Value, 96, FCurrentPPI);
+end;
 
 initialization
   LoadShell32Functions;
@@ -2658,6 +2473,10 @@ finalization
   FSmallSysImages.Free;
   FExtraLargeSysImages.Free;
   FJumboSysImages.Free;
+  {$if CompilerVersion >= 33}
+  FreeAndNil(FLargeSysImagesForPPI);
+  FreeAndNil(FSmallSysImagesForPPI);
+  {$ifend}
   FreeAndNil(PIDLMgr);
 
 end.
